@@ -7871,7 +7871,7 @@ function Get-ResourceGovernorInformation {
 					ClassifierFunction = $Server.ResourceGovernor.ClassifierFunction
 					ReconfigurePending = $Server.ResourceGovernor.ReconfigurePending
 					ResourcePools = @() + (
-						$Server.ResourceGovernor.ResourcePools | ForEach-Object {
+						$Server.ResourceGovernor.ResourcePools | Where-Object { $_.ID } | ForEach-Object {
 							New-Object -TypeName psobject -Property @{
 								ID = $_.ID # System.Int32 ID {get;}
 								IsSystemObject = $_.IsSystemObject # System.Boolean IsSystemObject {get;}
@@ -7886,11 +7886,11 @@ function Get-ResourceGovernorInformation {
 								#Urn = $_.Urn	# Microsoft.SqlServer.Management.Sdk.Sfc.Urn Urn {get;}
 								#UserData = $_.UserData	# System.Object UserData {get;set;}
 								WorkloadGroups = @() + (
-									$_.WorkloadGroups | ForEach-Object {
+									$_.WorkloadGroups | Where-Object { $_.ID } |  ForEach-Object {
 										New-Object -TypeName psobject -Property @{
 											GroupMaximumRequests = $_.GroupMaximumRequests # System.Int32 GroupMaximumRequests {get;set;}
 											ID = $_.ID # System.Int32 ID {get;}
-											Importance = $_.Importance.ToString() # Microsoft.SqlServer.Management.Smo.WorkloadGroupImportance Importance {get;set;}
+											Importance = if ($_.Importance) { $_.Importance.ToString() } else { $null } # Microsoft.SqlServer.Management.Smo.WorkloadGroupImportance Importance {get;set;}
 											IsSystemObject = $_.IsSystemObject # System.Boolean IsSystemObject {get;}
 											MaximumDegreeOfParallelism = $_.MaximumDegreeOfParallelism # System.Int32 MaximumDegreeOfParallelism {get;set;}
 											Name = $_.Name # System.String Name {get;set;}
@@ -10992,14 +10992,27 @@ function Get-DatabaseMailInformation {
 
 					# For some reason SMO exposes these as name\value pairs instead of as properties
 					# As of SQL 2012 there's no mechanism to add new configuration values so I decided to go ahead and transform them here
-					ConfigurationValues = New-Object -TypeName psobject -Property @{
-						AccountRetryAttempts = $Server.Mail.ConfigurationValues['AccountRetryAttempts'].Value # System.String Value {get;set;}
-						AccountRetryDelaySeconds = $Server.Mail.ConfigurationValues['AccountRetryDelay'].Value # System.String Value {get;set;}
-						DatabaseMailExeMinimumLifeTimeSeconds = $Server.Mail.ConfigurationValues['DatabaseMailExeMinimumLifeTime'].Value # System.String Value {get;set;}
-						DefaultAttachmentEncoding = $Server.Mail.ConfigurationValues['DefaultAttachmentEncoding'].Value # System.String Value {get;set;}
-						LoggingLevel = $Server.Mail.ConfigurationValues['LoggingLevel'].Value # System.String Value {get;set;}
-						MaxFileSizeBytes = $Server.Mail.ConfigurationValues['MaxFileSize'].Value # System.String Value {get;set;}
-						ProhibitedExtensions = $Server.Mail.ConfigurationValues['ProhibitedExtensions'].Value # System.String Value {get;set;}
+					# Return NULLs if server is Express edition
+					ConfigurationValues = if ($Server.Information.Edition -inotlike 'Express*') {
+						New-Object -TypeName psobject -Property @{
+							AccountRetryAttempts = $Server.Mail.ConfigurationValues['AccountRetryAttempts'].Value # System.String Value {get;set;}
+							AccountRetryDelaySeconds = $Server.Mail.ConfigurationValues['AccountRetryDelay'].Value # System.String Value {get;set;}
+							DatabaseMailExeMinimumLifeTimeSeconds = $Server.Mail.ConfigurationValues['DatabaseMailExeMinimumLifeTime'].Value # System.String Value {get;set;}
+							DefaultAttachmentEncoding = $Server.Mail.ConfigurationValues['DefaultAttachmentEncoding'].Value # System.String Value {get;set;}
+							LoggingLevel = $Server.Mail.ConfigurationValues['LoggingLevel'].Value # System.String Value {get;set;}
+							MaxFileSizeBytes = $Server.Mail.ConfigurationValues['MaxFileSize'].Value # System.String Value {get;set;}
+							ProhibitedExtensions = $Server.Mail.ConfigurationValues['ProhibitedExtensions'].Value # System.String Value {get;set;}
+						}
+					} else {
+						New-Object -TypeName psobject -Property @{
+							AccountRetryAttempts = $null
+							AccountRetryDelaySeconds = $null
+							DatabaseMailExeMinimumLifeTimeSeconds = $null
+							DefaultAttachmentEncoding = $null
+							LoggingLevel = $null
+							MaxFileSizeBytes = $null
+							ProhibitedExtensions = $null
+						}
 					}
 
 					# 				$Server.Mail.ConfigurationValues | ForEach-Object {
@@ -11611,7 +11624,10 @@ function Get-SqlServerDatabaseEngineInformation {
 				# AGENT
 				######################
 
-				if ($ServerInformation.Server.Configuration.General.ServerType -ieq 'standalone') {
+				if (
+					$ServerInformation.Server.Configuration.General.ServerType -ieq 'standalone' -and
+					$Server.Information.Edition -inotlike 'Express*' 
+				) {
 
 					# Service
 					######################
