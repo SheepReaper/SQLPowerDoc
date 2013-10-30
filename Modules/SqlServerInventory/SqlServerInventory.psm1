@@ -107,18 +107,16 @@ function ConvertTo-GzCliXml {
 		$BufferedStream = New-Object -TypeName System.IO.BufferedStream($GZipStream, 8192)
 		$xw = [System.Xml.XmlTextWriter]::Create($BufferedStream)
 		$serializer = $ctor.Invoke($xw)
-		$method = $type.GetMethod('Serialize', 'nonpublic,instance', $null, [type[]]@([object]), $null)
-		$done = $type.GetMethod('Done', [System.Reflection.BindingFlags]'nonpublic,instance')
 	}
 	process {
 		try {
-			[void]$method.Invoke($serializer, $InputObject)
+			[void]$type.InvokeMember('Serialize', 'InvokeMethod,NonPublic,Instance', $null, $serializer, [object[]]@($InputObject))
 		} catch {
 			write-warning "Could not serialize $($InputObject.gettype()): $_"
 		}
 	}
 	end {
-		[void]$done.invoke($serializer, @())
+		[void]$type.InvokeMember('Done', 'InvokeMethod,NonPublic,Instance', $null, $serializer, @())
 		$xw.Close()
 		$BufferedStream.Flush()
 		$BufferedStream.Dispose()
@@ -133,7 +131,7 @@ function ConvertTo-GzCliXml {
 		$MemoryStream.Dispose()
 
 		# Cleanup
-		Remove-Variable -Name type, ctor, MemoryStream, GZipStream, xw, serializer, method, done 
+		Remove-Variable -Name type, ctor, MemoryStream, GZipStream, xw, serializer 
 	}
 }
 
@@ -158,12 +156,10 @@ function ConvertFrom-GzCliXml {
 		$GZipStream = New-Object -TypeName System.IO.Compression.GZipStream($MemoryStream, [System.IO.Compression.CompressionMode]::Decompress, $false)
 		$xr = [System.Xml.XmlTextReader]::Create($GZipStream)
 		$deserializer = $ctor.Invoke($xr)
-		$method = @($type.GetMethods('nonpublic,instance') | Where-Object {$_.Name -like "Deserialize"})[1]
-		$done = $type.GetMethod('Done', [System.Reflection.BindingFlags]'nonpublic,instance')
-		while (!$done.Invoke($deserializer, @()))
+		while (!$type.InvokeMember('Done', 'InvokeMethod,NonPublic,Instance', $null, $deserializer, @()))
 		{
 			try {
-				$method.Invoke($deserializer, "")
+				$type.InvokeMember('Deserialize', 'InvokeMethod,NonPublic,Instance', $null, $deserializer, @())
 			} catch {
 				Write-Warning "Could not deserialize ${string}: $_"
 			}
@@ -173,7 +169,7 @@ function ConvertFrom-GzCliXml {
 		$MemoryStream.Dispose()
 
 		# Cleanup
-		Remove-Variable -Name type, ctor, MemoryStream, GZipStream, xr, deserializer, method, done 
+		Remove-Variable -Name type, ctor, MemoryStream, GZipStream, xr, deserializer 
 	}
 }
 
@@ -196,18 +192,16 @@ function Export-GzCliXml {
 		$BufferedStream = New-Object -TypeName System.IO.BufferedStream($GZipStream, 8192)
 		$xw = [System.Xml.XmlTextWriter]::Create($BufferedStream)
 		$serializer = $ctor.Invoke($xw)
-		$method = $type.GetMethod('Serialize', 'nonpublic,instance', $null, [type[]]@([object]), $null)
-		$done = $type.GetMethod('Done', [System.Reflection.BindingFlags]'nonpublic,instance')
 	}
 	process {
 		try {
-			[void]$method.Invoke($serializer, $InputObject)
+			[void]$type.InvokeMember('Serialize', 'InvokeMethod,NonPublic,Instance', $null, $serializer, [object[]]@($InputObject))
 		} catch {
 			write-warning "Could not serialize $($InputObject.gettype()): $_"
 		}
 	}
 	end {
-		[void]$done.invoke($serializer, @())
+		[void]$type.InvokeMember('Done', 'InvokeMethod,NonPublic,Instance', $null, $serializer, @())
 		$xw.Close()
 		$BufferedStream.Flush()
 		$BufferedStream.Dispose()
@@ -215,7 +209,7 @@ function Export-GzCliXml {
 		$FileStream.Dispose()
 
 		# Cleanup
-		Remove-Variable -Name type, ctor, FileStream, GZipStream, xw, serializer, method, done 
+		Remove-Variable -Name type, ctor, FileStream, GZipStream, xw, serializer
 	}
 }
 
@@ -238,12 +232,10 @@ function Import-GzCliXml {
 			$GZipStream = New-Object -TypeName System.IO.Compression.GZipStream($FileStream, [System.IO.Compression.CompressionMode]::Decompress, $false)
 			$xr = [System.Xml.XmlTextReader]::Create($GZipStream)
 			$deserializer = $ctor.Invoke($xr)
-			$method = @($type.GetMethods('nonpublic,instance') | Where-Object {$_.Name -like "Deserialize"})[1]
-			$done = $type.GetMethod('Done', [System.Reflection.BindingFlags]'nonpublic,instance')
-			while (!$done.Invoke($deserializer, @()))
+			while (!$type.InvokeMember('Done', 'InvokeMethod,NonPublic,Instance', $null, $deserializer, @()))
 			{
 				try {
-					$method.Invoke($deserializer, "")
+					$type.InvokeMember('Deserialize', 'InvokeMethod,NonPublic,Instance', $null, $deserializer, @())
 				} catch {
 					Write-Warning "Could not deserialize ${string}: $_"
 				}
@@ -256,7 +248,7 @@ function Import-GzCliXml {
 	end
 	{
 		# Cleanup
-		Remove-Variable -Name type, ctor, FileStream, GZipStream, xr, deserializer, method, done 
+		Remove-Variable -Name type, ctor, FileStream, GZipStream, xr, deserializer 
 	}
 }
 
@@ -6022,7 +6014,10 @@ function Export-SqlServerInventoryDatabaseEngineConfigToExcel {
 					$WorksheetData[$Row,$Col++] = $_.IsSystemObject
 					$WorksheetData[$Row,$Col++] = $_.HasBlankPassword
 					$WorksheetData[$Row,$Col++] = $_.HasNameAsPassword
-					$WorksheetData[$Row,$Col++] = ($_.Member | Where-Object { $_.Sid } | ForEach-Object { $_.NTAccountName } | Sort-Object) -join $Delimiter
+					$WorksheetData[$Row,$Col++] = $(
+						$Member = ($_.Member | Where-Object { $_.Sid } | ForEach-Object { $_.NTAccountName } | Sort-Object) -join $Delimiter
+						if ($Member.Length -gt 5000) { $Member.Substring(0, 4997) + '...' } else { $Member }
+					)
 					$Row++
 				}
 			}
