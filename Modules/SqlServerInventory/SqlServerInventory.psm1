@@ -37,6 +37,7 @@ New-Object -TypeName System.Version -ArgumentList '9.0.0.0' | New-Variable -Name
 New-Object -TypeName System.Version -ArgumentList '10.0.0.0' | New-Variable -Name SQLServer2008 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '10.50.0.0' | New-Variable -Name SQLServer2008R2 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '11.0.0.0' | New-Variable -Name SQLServer2012 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '12.0.0.0' | New-Variable -Name SQLServer2014 -Scope Script -Option Constant
 
 
 ######################
@@ -92,7 +93,7 @@ function Remove-ComObject {
 }
 
 
-# Based on http://poshcode.org/4050
+# Based on http://poshcode.org/4544
 function ConvertTo-GzCliXml {
 	param(
 		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
@@ -135,7 +136,7 @@ function ConvertTo-GzCliXml {
 	}
 }
 
-# Based on http://poshcode.org/4051
+# Based on http://poshcode.org/4545
 function ConvertFrom-GzCliXml {
 	param(
 		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
@@ -173,7 +174,7 @@ function ConvertFrom-GzCliXml {
 	}
 }
 
-# Based on http://poshcode.org/4050
+# Based on http://poshcode.org/4544
 function Export-GzCliXml {
 	param(
 		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
@@ -213,7 +214,7 @@ function Export-GzCliXml {
 	}
 }
 
-# Based on http://poshcode.org/4051
+# Based on http://poshcode.org/4545
 function Import-GzCliXml {
 	param(
 		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
@@ -491,7 +492,7 @@ function Export-SqlServerInventoryToGzClixml {
 			$DatabaseServer.Server = $_.Server.psobject.Copy()
 			#$DatabaseServer.Databases = $_.Server.Databases.psobject.Copy()
 
-			$DatabaseServer.Server.Databases = $DatabaseServer.Server.Databases | ForEach-Object {
+			$DatabaseServer.Server.Databases = $DatabaseServer.Server.Databases | Where-Object { $_.Id } | ForEach-Object {
 				$Database = $_.psobject.Copy()
 
 				# In some cases there can be a TON of object permissions
@@ -1761,7 +1762,7 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 
 
 			# Servers with Non-Default Config Values
-			# Exclude xp_cmdshell because this is checked elsewhere
+			# Exclude xp_cmdshell and priority boost because they are specifically checked next
 			# Exclude 'max server memory (MB)' because it's a GOOD thing if this is changed from the default
 			# 
 			#region
@@ -1774,7 +1775,7 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 						'backup compression default', 'common criteria compliance enabled', 'contained database authentication',
 						'EKM provider enabled'
 						#>
-						'xp_cmdshell', 'max server memory (MB)'
+						'xp_cmdshell', 'max server memory (MB)','priority boost'
 					) -inotcontains $_.ConfigurationName
 				) -and
 				-not [String]::IsNullOrEmpty($_.ConfigurationName) -and
@@ -1819,6 +1820,23 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 				-URL $([String]::Concat(@('http://msdn.microsoft.com/en-us/library/ms175046', $HelpUrlModifier, '.aspx')))
 			}
 			#endregion
+
+
+	        # Priority Boost Enabled
+	        #region
+	        if ($DatabaseServer.Server.Configuration.Processor.BoostSqlServerPriority.RunningValue -eq $true) {
+
+		        $Details = "Priority Boost is enabled. Although this sounds like it might help it could also cause your SQL Server to crash. Microsoft recommends that it's only enabled for very unusual circumstances - e.g. if PSS is investigating a performance issue."
+
+		        Get-AssessmentFinding -ServerName $ServerName `
+		        -DatabaseName $NullDatabaseName `
+		        -Priority $MediumPriority `
+		        -Category $CatReliability `
+		        -Description 'Priority Boost Enabled' `
+		        -Details $Details `
+		        -URL $([String]::Concat(@('http://msdn.microsoft.com/en-us/library/ms180943', $HelpUrlModifier, '.aspx')))
+	        }
+	        #endregion
 
 
 			# Server public Permissions
@@ -1953,14 +1971,15 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 
 
 			# No Alerts for Sev 19-25
+           
 			#region
 			if (
 				$DatabaseServer.Agent.Alerts -and 
 				$(
 					$_.Agent.Alerts | Where-Object { 
 						$_.General.ID -and
-						$_.General.Definition.Severity -ge 19 -and
-						$_.General.Definition.Severity -le 25
+						$(($_.General.Definition.Severity).Substring(0,3) -as [int]) -ge 19 -and
+						$(($_.General.Definition.Severity).Substring(0,3) -as [int]) -le 25
 					} | Measure-Object
 				).Count -eq 0
 			) {
@@ -3244,9 +3263,10 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 				}
 				#endregion
 
-				# Page Verification Not Optimal
+				# Page Verification Not Optimal (SQL 2005 and higher)
 				#region
 				if (
+				    $ServerVersion.CompareTo($SQLServer2005) -ge 0 -and                     
 					$_.Name -ine 'tempdb' -and
 					$_.Properties.Options.OtherOptions.Recovery.PageVerify -ine 'CHECKSUM'
 				) {
@@ -3260,6 +3280,23 @@ function Get-SqlServerInventoryDatabaseEngineAssessment {
 					-Description 'Page Verification Not Optimal'`
 					-Details $Details `
 					-URL $([String]::Concat(@('http://msdn.microsoft.com/en-us/library/bb402873', $HelpUrlModifier, '.aspx')))
+				} 
+                # Page Verification Not Optimal (SQL 2000 and prior)
+                elseif (
+				    $ServerVersion.CompareTo($SQLServer2005) -lt 0 -and                     
+					$_.Name -ine 'tempdb' -and
+					$_.Properties.Options.OtherOptions.Recovery.PageVerify -ine 'TORN_PAGE_DETECTION'                    
+                ) {
+
+					$Details = "Database has $($_.Properties.Options.OtherOptions.Recovery.PageVerify) for page verification. SQL Server may have a harder time recognizing and recovering from storage corruption. Consider enabling TORN_PAGE_DETECTION instead."
+
+					Get-AssessmentFinding -ServerName $ServerName `
+					-DatabaseName $DatabaseName `
+					-Priority $MediumPriority `
+					-Category $CatReliability `
+					-Description 'Page Verification Not Optimal'`
+					-Details $Details `
+					-URL $([String]::Concat(@('http://technet.microsoft.com/en-us/library/aa275464', $HelpUrlModifier, '.aspx')))
 				}
 				#endregion
 
