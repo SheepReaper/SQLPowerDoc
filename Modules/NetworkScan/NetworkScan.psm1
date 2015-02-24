@@ -1593,7 +1593,9 @@ function Find-SqlServerService {
 					)
 
                     # Add the discovered instance to the found instance collection
-                    $InstanceCollection += $InstanceName
+                    if ($InstanceCollection -inotcontains $InstanceName) {
+                        $InstanceCollection += $InstanceName
+                    }
 				} 
 			}
 			catch {
