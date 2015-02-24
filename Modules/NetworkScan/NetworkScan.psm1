@@ -1331,6 +1331,7 @@ function Find-SqlServerService {
 			$RegistryKeyPath = $null
 			$Parameters = $null
 			$StartupParameters = $null
+            $InstanceCollection = @()
 
 
 			$ManagedComputer = New-Object -TypeName 'Microsoft.SqlServer.Management.Smo.Wmi.ManagedComputer' -ArgumentList $ComputerName
@@ -1590,301 +1591,312 @@ function Find-SqlServerService {
 							StartupParameters = $_.StartupParameters
 						}
 					)
+
+                    # Add the discovered instance to the found instance collection
+                    $InstanceCollection += $InstanceName
 				} 
 			}
 			catch {
 
 				# If we get this error it's possible that this is a SQL 2000 server in which case we need to look at the registry to find installed services
-				if ($_.Exception.Message -ilike '*SQL Server WMI provider is not available*') {
-					try {
-
-						# Use the WMI Registry provider to access the registry on $ComputerName
-						# For info on using this WMI class see http://msdn.microsoft.com/en-us/library/windows/desktop/aa393664(v=vs.85).aspx
-						$StdRegProv = Get-WmiObject -Namespace root\DEFAULT -Query "select * FROM meta_class WHERE __Class = 'StdRegProv'" -ComputerName $ComputerName -ErrorAction Stop
-
-						# Iterate through installed instances of the Database Engine (which includes the SQL Agent)
-						$($StdRegProv.GetMultiStringValue($HKEY_LOCAL_MACHINE,'SOFTWARE\Microsoft\Microsoft SQL Server','InstalledInstances')).sValue | ForEach-Object {
-
-							if ($_ -ine 'MSSQLSERVER') {
-								$InstanceName = $_
-								$DisplayName = "MSSQL`$$InstanceName"
-								$IsNamedInstance = $true
-								$RegistryKeyRootPath = "SOFTWARE\Microsoft\Microsoft SQL Server\$($_)"
-							} else {
-								$InstanceName = $null
-								$DisplayName = 'MSSQLSERVER'
-								$IsNamedInstance = $false
-								$RegistryKeyRootPath = 'SOFTWARE\Microsoft\MSSQLServer'
-							}
-
-							# Determine if instance is clustered
-							$IsClusteredInstance = $null
-							$ClusterName = [String]::Empty
-
-							# If $ComputerName is the local host then use the loopback IP, otherwise use $IpAddress
-							if (
-								$ComputerName -ieq $env:COMPUTERNAME -or
-								$ComputerName.StartsWith([String]::Concat($env:COMPUTERNAME, '.'), [System.StringComparison]::InvariantCultureIgnoreCase)
-							) {
-								$ServiceIpAddress = '127.0.0.1'
-							} else {
-								$ServiceIpAddress = $IpAddress
-							}
-
-
-							# Get the TCP port number for SQL Server Services
-							$Port = ($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,"$RegistryKeyRootPath\MSSQLServer\SuperSocketNetLib\Tcp",'TcpDynamicPorts')).sValue
-							if (-not $Port) {
-								$Port = ($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,"$RegistryKeyRootPath\MSSQLServer\SuperSocketNetLib\Tcp",'TcpPort')).sValue
-								$IsDynamicPort = $false
-							} else {
-								$IsDynamicPort = $true
-							}
-
-							# Get Service Information
-							Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
-							-Filter $('DisplayName = "{0}" OR DisplayName = "SQL Server ({0})"' -f $DisplayName) `
-							-Property PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
-							ForEach-Object {
-								$PathName = $_.PathName
-								$StartMode = $_.StartMode
-								$ProcessId = $_.ProcessId
-								$ServiceState = $_.State
-								$ServiceAccount = $_.StartName
-								$Description = $_.Description
-							}
-
-							# Get the Service Start Date (if it's got a Process ID greater than than 0)
-							if ($ProcessId -gt 0) {
-								try {
-									Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
-										$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
-									}
-								}
-								catch {
-									$ServiceStartDate = $null
-								}
-							} else {
-								$ServiceStartDate = $null
-							}
-
-
-							# Startup Parameters
-							$RegistryKeyPath = "$RegistryKeyRootPath\MSSQLServer\Parameters"
-							$Parameters = $StdRegProv.EnumValues($HKEY_LOCAL_MACHINE,$RegistryKeyPath)
-							$StartupParameters = @()
-
-							for ($i = 0; $i -lt ($Parameters.sNames | Measure-Object).Count; $i++) {
-								switch ($Parameters.Types[$i]) {
-									1 {
-										# REG_SZ
-										$StartupParameters += $($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue
-									}
-									2 { 
-										# REG_EXPAND_SZ
-										$StartupParameters += $($StdRegProv.GetExpandedStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue
-									}
-									3 {
-										# REG_BINARY
-										$StartupParameters += [System.BitConverter]::ToString($($StdRegProv.GetBinaryValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])").uValue) )
-									}
-									4 {
-										# REG_DWORD
-										$StartupParameters += $($StdRegProv.GetDWORDValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath, "$($Parameters.sNames[$i])")).uValue
-									}
-									7 {
-										# REG_MULTI_SZ
-										$($StdRegProv.GetMultiStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue | ForEach-Object {
-											$StartupParameters += $_
-										} 
-									}
-									default { $null }
-								}
-							} 
-
-							Write-Output (
-								New-Object -TypeName psobject -Property @{
-									ComputerName = $ComputerName
-									DisplayName = $DisplayName
-									Description = $Description
-									ComputerIpAddress = $IpAddress
-									IsNamedInstance = $IsNamedInstance
-									IsClusteredInstance = $IsClusteredInstance
-									IsDynamicPort = $IsDynamicPort
-									IsHadrEnabled = $null # Not applicable to SQL 2000
-									PathName = $PathName
-									Port = $Port
-									ProcessId = $ProcessId
-									ServerName = $(
-										if ($IsNamedInstance -eq $true) {
-											if ($IsClusteredInstance -eq $true) {
-												[String]::Join('\', @($ClusterName, $InstanceName))
-											} else {
-												[String]::Join('\', @($ComputerName, $InstanceName))
-											}
-										} else {
-											if ($IsClusteredInstance -eq $true) {
-												$ClusterName
-											} else {
-												$ComputerName
-											}
-										}
-									)
-									ServiceIpAddress = $ServiceIpAddress
-									ServiceProtocols = $null # TODO: Gather protocol information from registry
-									ServiceStartDate = $ServiceStartDate
-									ServiceState = $ServiceState
-									ServiceTypeName = 'SQL Server'
-									ServiceAccount = $ServiceAccount
-									StartMode = $StartMode
-									StartupParameters = [String]::Join(';', $StartupParameters)
-								}
-							)
-
-
-
-							# Now let's tackle the SQL Agent. A lot of the information is the same as the SQL Server Service
-							if ($IsNamedInstance) {
-								$DisplayName = "SQLAgent`$$InstanceName"
-							} else {
-								$DisplayName = 'SQLSERVERAGENT'
-							}
-
-							# Get Service Information
-							Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
-							-Filter $('DisplayName = "{0}" OR DisplayName = "SQL Server Agent ({0})"' -f $DisplayName) `
-							-Property PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
-							ForEach-Object {
-								$PathName = $_.PathName
-								$StartMode = $_.StartMode
-								$ProcessId = $_.ProcessId
-								$ServiceState = $_.State
-								$ServiceAccount = $_.StartName
-								$Description = $_.Description
-							}
-
-							# Get the Service Start Date (if it's got a Process ID greater than than 0)
-							if ($ProcessId -gt 0) {
-								try {
-									Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
-										$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
-									}
-								}
-								catch {
-									$ServiceStartDate = $null
-								}
-							} else {
-								$ServiceStartDate = $null
-							}
-
-							Write-Output (
-								New-Object -TypeName psobject -Property @{
-									ComputerName = $ComputerName
-									DisplayName = $DisplayName
-									Description = $Description
-									ComputerIpAddress = $IpAddress
-									IsNamedInstance = $IsNamedInstance
-									IsClusteredInstance = $IsClusteredInstance
-									IsDynamicPort = $IsDynamicPort
-									IsHadrEnabled = $null # Not applicable to SQL 2000
-									PathName = $PathName
-									Port = $null
-									ProcessId = $ProcessId
-									ServerName = $(
-										if ($IsNamedInstance -eq $true) {
-											if ($IsClusteredInstance -eq $true) {
-												[String]::Join('\', @($ClusterName, $InstanceName))
-											} else {
-												[String]::Join('\', @($ComputerName, $InstanceName))
-											}
-										} else {
-											if ($IsClusteredInstance -eq $true) {
-												$ClusterName
-											} else {
-												$ComputerName
-											}
-										}
-									)
-									ServiceIpAddress = $ServiceIpAddress
-									ServiceStartDate = $ServiceStartDate
-									ServiceState = $ServiceState
-									ServiceTypeName = 'SQL Server Agent'
-									ServiceAccount = $ServiceAccount
-									StartMode = $StartMode
-									StartupParameters = $null
-								}
-							)
-						}
-
-						# Now let's test for Analysis Services, Reporting Services, and Microsoft Search. 
-						# You can't have more than one instance of each in 2000
-						Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
-						-Filter "(DisplayName = 'MSSQLServerOLAPService') or (DisplayName = 'Microsoft Search') or (DisplayName = 'ReportServer')" `
-						-Property DisplayName,PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
-						ForEach-Object {
-
-							$DisplayName = $_.DisplayName
-							$PathName = $_.PathName
-							$StartMode = $_.StartMode
-							$ProcessId = $_.ProcessId
-							$ServiceState = $_.State
-							$ServiceAccount = $_.StartName
-							$Description = $_.Description
-
-							# Get the Service Start Date (if it's got a Process ID greater than than 0)
-							if ($ProcessId -gt 0) {
-								try {
-									Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
-										$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
-									}
-								}
-								catch {
-									$ServiceStartDate = $null
-								}
-							} else {
-								$ServiceStartDate = $null
-							}
-
-							Write-Output (
-								New-Object -TypeName psobject -Property @{
-									ComputerName = $ComputerName
-									DisplayName = $DisplayName
-									Description = $Description
-									ComputerIpAddress = $IpAddress
-									IsNamedInstance = $false # Can't have named instances of SSAS, SSRS, or Microsoft Search in SQL 2000
-									IsClusteredInstance = $false # Can't cluster SSAS, SSRS, or Microsoft Search in SQL 2000
-									IsDynamicPort = $null
-									IsHadrEnabled = $null # Not applicable to SQL 2000
-									PathName = $PathName
-									Port = $null
-									ProcessId = $ProcessId
-									ServerName = $ComputerName
-									ServiceIpAddress = $IpAddress
-									ServiceStartDate = $ServiceStartDate
-									ServiceState = $ServiceState
-									ServiceTypeName = switch ($DisplayName) {
-										'Microsoft Search' { 'Microsoft Search service' } 
-										'MSSQLServerOLAPService' { 'SQL Server Analysis Services' }
-										'ReportServer' { 'SQL Server Reporting Services' }
-										default { 'Unknown' }
-									}
-									ServiceAccount = $ServiceAccount
-									StartMode = $StartMode
-									StartupParameters = $null
-								}
-							)
-						} 
-
-					}
-					catch {
-						throw
-					}
-				}
-				else {
+				if ($_.Exception.Message -inotlike '*SQL Server WMI provider is not available*') {
 					# Something else has happened; Let the error bubble up
 					throw
 				}
 			}
+
+
+            # Now look through the machine's registry for instances that were not found by the ManagedComputer object
+            # This can happen for a few reasons:
+            #   - Using a lower version of SMO on the machine where the script is running than the version of SQL Server on the target server
+            #   - The target server is running one or more SQL 2000 instances
+			try {
+
+				# Use the WMI Registry provider to access the registry on $ComputerName
+				# For info on using this WMI class see http://msdn.microsoft.com/en-us/library/windows/desktop/aa393664(v=vs.85).aspx
+				$StdRegProv = Get-WmiObject -Namespace root\DEFAULT -Query "select * FROM meta_class WHERE __Class = 'StdRegProv'" -ComputerName $ComputerName -ErrorAction Stop
+
+				# Iterate through installed instances of the Database Engine (which includes the SQL Agent)
+				$($StdRegProv.GetMultiStringValue($HKEY_LOCAL_MACHINE,'SOFTWARE\Microsoft\Microsoft SQL Server','InstalledInstances')).sValue | 
+                Where-Object { $InstanceCollection -inotcontains $_} |
+                ForEach-Object {
+
+					if ($_ -ine 'MSSQLSERVER') {
+						$InstanceName = $_
+						$DisplayName = "MSSQL`$$InstanceName"
+						$IsNamedInstance = $true
+						$RegistryKeyRootPath = "SOFTWARE\Microsoft\Microsoft SQL Server\$($_)"
+					} else {
+						$InstanceName = $null
+						$DisplayName = 'MSSQLSERVER'
+						$IsNamedInstance = $false
+						$RegistryKeyRootPath = 'SOFTWARE\Microsoft\MSSQLServer'
+					}
+
+					# Determine if instance is clustered
+					$IsClusteredInstance = $null
+					$ClusterName = [String]::Empty
+
+					# If $ComputerName is the local host then use the loopback IP, otherwise use $IpAddress
+					if (
+						$ComputerName -ieq $env:COMPUTERNAME -or
+						$ComputerName.StartsWith([String]::Concat($env:COMPUTERNAME, '.'), [System.StringComparison]::InvariantCultureIgnoreCase)
+					) {
+						$ServiceIpAddress = '127.0.0.1'
+					} else {
+						$ServiceIpAddress = $IpAddress
+					}
+
+
+					# Get the TCP port number for SQL Server Services
+					$Port = ($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,"$RegistryKeyRootPath\MSSQLServer\SuperSocketNetLib\Tcp",'TcpDynamicPorts')).sValue
+					if (-not $Port) {
+						$Port = ($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,"$RegistryKeyRootPath\MSSQLServer\SuperSocketNetLib\Tcp",'TcpPort')).sValue
+						$IsDynamicPort = $false
+					} else {
+						$IsDynamicPort = $true
+					}
+
+					# Get Service Information
+					Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
+					-Filter $('DisplayName = "{0}" OR DisplayName = "SQL Server ({0})"' -f $DisplayName) `
+					-Property PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
+					ForEach-Object {
+						$PathName = $_.PathName
+						$StartMode = $_.StartMode
+						$ProcessId = $_.ProcessId
+						$ServiceState = $_.State
+						$ServiceAccount = $_.StartName
+						$Description = $_.Description
+					}
+
+					# Get the Service Start Date (if it's got a Process ID greater than than 0)
+					if ($ProcessId -gt 0) {
+						try {
+							Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
+								$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
+							}
+						}
+						catch {
+							$ServiceStartDate = $null
+						}
+					} else {
+						$ServiceStartDate = $null
+					}
+
+
+					# Startup Parameters
+					$RegistryKeyPath = "$RegistryKeyRootPath\MSSQLServer\Parameters"
+					$Parameters = $StdRegProv.EnumValues($HKEY_LOCAL_MACHINE,$RegistryKeyPath)
+					$StartupParameters = @()
+
+					for ($i = 0; $i -lt ($Parameters.sNames | Measure-Object).Count; $i++) {
+						switch ($Parameters.Types[$i]) {
+							1 {
+								# REG_SZ
+								$StartupParameters += $($StdRegProv.GetStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue
+							}
+							2 { 
+								# REG_EXPAND_SZ
+								$StartupParameters += $($StdRegProv.GetExpandedStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue
+							}
+							3 {
+								# REG_BINARY
+								$StartupParameters += [System.BitConverter]::ToString($($StdRegProv.GetBinaryValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])").uValue) )
+							}
+							4 {
+								# REG_DWORD
+								$StartupParameters += $($StdRegProv.GetDWORDValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath, "$($Parameters.sNames[$i])")).uValue
+							}
+							7 {
+								# REG_MULTI_SZ
+								$($StdRegProv.GetMultiStringValue($HKEY_LOCAL_MACHINE,$RegistryKeyPath,"$($Parameters.sNames[$i])")).sValue | ForEach-Object {
+									$StartupParameters += $_
+								} 
+							}
+							default { $null }
+						}
+					} 
+
+					Write-Output (
+						New-Object -TypeName psobject -Property @{
+							ComputerName = $ComputerName
+							DisplayName = $DisplayName
+							Description = $Description
+							ComputerIpAddress = $IpAddress
+							IsNamedInstance = $IsNamedInstance
+							IsClusteredInstance = $IsClusteredInstance
+							IsDynamicPort = $IsDynamicPort
+							IsHadrEnabled = $null # Not applicable to SQL 2000
+							PathName = $PathName
+							Port = $Port
+							ProcessId = $ProcessId
+							ServerName = $(
+								if ($IsNamedInstance -eq $true) {
+									if ($IsClusteredInstance -eq $true) {
+										[String]::Join('\', @($ClusterName, $InstanceName))
+									} else {
+										[String]::Join('\', @($ComputerName, $InstanceName))
+									}
+								} else {
+									if ($IsClusteredInstance -eq $true) {
+										$ClusterName
+									} else {
+										$ComputerName
+									}
+								}
+							)
+							ServiceIpAddress = $ServiceIpAddress
+							ServiceProtocols = $null # TODO: Gather protocol information from registry
+							ServiceStartDate = $ServiceStartDate
+							ServiceState = $ServiceState
+							ServiceTypeName = 'SQL Server'
+							ServiceAccount = $ServiceAccount
+							StartMode = $StartMode
+							StartupParameters = [String]::Join(';', $StartupParameters)
+						}
+					)
+
+
+
+					# Now let's tackle the SQL Agent. A lot of the information is the same as the SQL Server Service
+					if ($IsNamedInstance) {
+						$DisplayName = "SQLAgent`$$InstanceName"
+					} else {
+						$DisplayName = 'SQLSERVERAGENT'
+					}
+
+					# Get Service Information
+					Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
+					-Filter $('DisplayName = "{0}" OR DisplayName = "SQL Server Agent ({0})"' -f $DisplayName) `
+					-Property PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
+					ForEach-Object {
+						$PathName = $_.PathName
+						$StartMode = $_.StartMode
+						$ProcessId = $_.ProcessId
+						$ServiceState = $_.State
+						$ServiceAccount = $_.StartName
+						$Description = $_.Description
+					}
+
+					# Get the Service Start Date (if it's got a Process ID greater than than 0)
+					if ($ProcessId -gt 0) {
+						try {
+							Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
+								$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
+							}
+						}
+						catch {
+							$ServiceStartDate = $null
+						}
+					} else {
+						$ServiceStartDate = $null
+					}
+
+					Write-Output (
+						New-Object -TypeName psobject -Property @{
+							ComputerName = $ComputerName
+							DisplayName = $DisplayName
+							Description = $Description
+							ComputerIpAddress = $IpAddress
+							IsNamedInstance = $IsNamedInstance
+							IsClusteredInstance = $IsClusteredInstance
+							IsDynamicPort = $IsDynamicPort
+							IsHadrEnabled = $null # Not applicable to SQL 2000
+							PathName = $PathName
+							Port = $null
+							ProcessId = $ProcessId
+							ServerName = $(
+								if ($IsNamedInstance -eq $true) {
+									if ($IsClusteredInstance -eq $true) {
+										[String]::Join('\', @($ClusterName, $InstanceName))
+									} else {
+										[String]::Join('\', @($ComputerName, $InstanceName))
+									}
+								} else {
+									if ($IsClusteredInstance -eq $true) {
+										$ClusterName
+									} else {
+										$ComputerName
+									}
+								}
+							)
+							ServiceIpAddress = $ServiceIpAddress
+							ServiceStartDate = $ServiceStartDate
+							ServiceState = $ServiceState
+							ServiceTypeName = 'SQL Server Agent'
+							ServiceAccount = $ServiceAccount
+							StartMode = $StartMode
+							StartupParameters = $null
+						}
+					)
+				}
+
+				# Now let's test for Analysis Services, Reporting Services, and Microsoft Search. 
+				# You can't have more than one instance of each in 2000
+				Get-WmiObject -Namespace root\CIMV2 -Class Win32_Service `
+				-Filter "(DisplayName = 'MSSQLServerOLAPService') or (DisplayName = 'Microsoft Search') or (DisplayName = 'ReportServer')" `
+				-Property DisplayName,PathName,StartMode,ProcessId,State,StartName,Description -ComputerName $IpAddress -ErrorAction Stop | 
+				ForEach-Object {
+
+					$DisplayName = $_.DisplayName
+					$PathName = $_.PathName
+					$StartMode = $_.StartMode
+					$ProcessId = $_.ProcessId
+					$ServiceState = $_.State
+					$ServiceAccount = $_.StartName
+					$Description = $_.Description
+
+					# Get the Service Start Date (if it's got a Process ID greater than than 0)
+					if ($ProcessId -gt 0) {
+						try {
+							Get-WmiObject -Namespace root\CIMV2 -Class Win32_Process -Filter "ProcessId = '$ProcessId'" -Property CreationDate -ComputerName $IpAddress -ErrorAction Stop | ForEach-Object {
+								$ServiceStartDate = $_.ConvertToDateTime($_.CreationDate)
+							}
+						}
+						catch {
+							$ServiceStartDate = $null
+						}
+					} else {
+						$ServiceStartDate = $null
+					}
+
+					Write-Output (
+						New-Object -TypeName psobject -Property @{
+							ComputerName = $ComputerName
+							DisplayName = $DisplayName
+							Description = $Description
+							ComputerIpAddress = $IpAddress
+							IsNamedInstance = $false # Can't have named instances of SSAS, SSRS, or Microsoft Search in SQL 2000
+							IsClusteredInstance = $false # Can't cluster SSAS, SSRS, or Microsoft Search in SQL 2000
+							IsDynamicPort = $null
+							IsHadrEnabled = $null # Not applicable to SQL 2000
+							PathName = $PathName
+							Port = $null
+							ProcessId = $ProcessId
+							ServerName = $ComputerName
+							ServiceIpAddress = $IpAddress
+							ServiceStartDate = $ServiceStartDate
+							ServiceState = $ServiceState
+							ServiceTypeName = switch ($DisplayName) {
+								'Microsoft Search' { 'Microsoft Search service' } 
+								'MSSQLServerOLAPService' { 'SQL Server Analysis Services' }
+								'ReportServer' { 'SQL Server Reporting Services' }
+								default { 'Unknown' }
+							}
+							ServiceAccount = $ServiceAccount
+							StartMode = $StartMode
+							StartupParameters = $null
+						}
+					)
+				} 
+
+			}
+			catch {
+				throw
+			}
+
+
 		}
 
 
