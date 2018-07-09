@@ -8,3 +8,5 @@
 
 ### Login 
 * with SQL Server SYSADMIN Rights
+
+[more you find here] (~/docs/SqlServerInventory Readme.txt)
