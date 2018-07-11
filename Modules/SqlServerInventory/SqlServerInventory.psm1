@@ -16,6 +16,7 @@ New-Variable -Name CatSecurity -Value 'Security' -Scope Script -Option Constant
 New-Variable -Name CatAvailability -Value 'Availability' -Scope Script -Option Constant
 New-Variable -Name CatRecovery -Value 'Recovery' -Scope Script -Option Constant
 New-Variable -Name CatInformation -Value 'Information' -Scope Script -Option Constant
+
 New-Variable -Name CatProperties -Value 'Properties' -Scope Script -Option Constant
 
 
