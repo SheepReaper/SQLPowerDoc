@@ -306,6 +306,8 @@ The following examples demonstrate how to combine all the parameters together wh
  
 Additional Help
 ---------------
-If you're still having problems using SQL Power Doc after reading through this guide please post in the Discussions (https://sqlpowerdoc.codeplex.com/discussions) or reach out to @SQLDBA on Twitter.
+If you're still having problems using SQL Power Doc after reading through this 
+guide please post in the Discussions (https://sqlpowerdoc.codeplex.com/discussions) 
+or reach out to @SQLDBA, @LarsPlatzdasch on Twitter.
 
 	
