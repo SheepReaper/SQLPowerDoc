@@ -43,7 +43,7 @@ New-Object -TypeName System.Version -ArgumentList '11.0.0.0' | New-Variable -Nam
 New-Object -TypeName System.Version -ArgumentList '12.0.0.0' | New-Variable -Name SQLServer2014 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '13.0.0.0' | New-Variable -Name SQLServer2016 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '14.0.0.0' | New-Variable -Name SQLServer2017 -Scope Script -Option Constant
-
+New-Object -TypeName System.Version -ArgumentList '15.0.0.0' | New-Variable -Name SQLServer2019 -Scope Script -Option Constant
 
 ######################
 # SCRIPT VARIABLES
