@@ -9,6 +9,6 @@
 ### Login 
 * with SQL Server SYSADMIN Rights
 
-[more you find here] (https://github.com/larspl/SQLPowerDoc/blob/master/docs/SqlServerInventory%20Readme.txt)
+[more you find here](../../wiki)
 
 

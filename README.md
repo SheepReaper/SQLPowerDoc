@@ -56,7 +56,8 @@ SQL Power Doc isn't limited to just SQL Server - you can also use it to collect 
 
 ## Ready To Get Started?
 
-1.  Read the [Requirements](https://github.com/larspl/SQLPowerDoc/wiki/Requirements-for-SQLPowerDoc) and the [How To Guide](https://github.com/larspl/SQLPowerDoc/wiki/SQL-Server-&-Windows-Documentation-Using-Windows-PowerShell?title=Guide%20For%20PowerShell%20Beginners)
-2.  [Download](https://github.com/larspl/SQLPowerDoc/releases) the latest version
-3.  Collect an inventory
-4.  Look like a rockstar
+1.  Read the [Requirements](../../wiki/Requirements) and the [How To Guide](../../wiki/Guide-For-PowerShell-Beginners)
+2.  (Optional) Read the [ReadMe's](../../tree/master/docs)
+3.  [Download](../../releases) the latest version
+4.  Collect an inventory
+5.  Look like a rockstar
