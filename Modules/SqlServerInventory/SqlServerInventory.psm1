@@ -17,6 +17,9 @@ New-Variable -Name CatAvailability -Value 'Availability' -Scope Script -Option C
 New-Variable -Name CatRecovery -Value 'Recovery' -Scope Script -Option Constant
 New-Variable -Name CatInformation -Value 'Information' -Scope Script -Option Constant
 
+New-Variable -Name CatProperties -Value 'Properties' -Scope Script -Option Constant
+
+
 New-Variable -Name XlNumFmtDate -Value '[$-409]mm/dd/yyyy h:mm:ss AM/PM;@' -Scope Script -Option Constant
 New-Variable -Name XlNumFmtTime -Value '[$-409]h:mm:ss AM/PM;@' -Scope Script -Option Constant
 New-Variable -Name XlNumFmtText -Value '@' -Scope Script -Option Constant
@@ -38,7 +41,9 @@ New-Object -TypeName System.Version -ArgumentList '10.0.0.0' | New-Variable -Nam
 New-Object -TypeName System.Version -ArgumentList '10.50.0.0' | New-Variable -Name SQLServer2008R2 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '11.0.0.0' | New-Variable -Name SQLServer2012 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '12.0.0.0' | New-Variable -Name SQLServer2014 -Scope Script -Option Constant
-
+New-Object -TypeName System.Version -ArgumentList '13.0.0.0' | New-Variable -Name SQLServer2016 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '14.0.0.0' | New-Variable -Name SQLServer2017 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '15.0.0.0' | New-Variable -Name SQLServer2019 -Scope Script -Option Constant
 
 ######################
 # SCRIPT VARIABLES
