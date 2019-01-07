@@ -21,6 +21,9 @@ New-Object -TypeName System.Version -ArgumentList '10.0.0.0' | New-Variable -Nam
 New-Object -TypeName System.Version -ArgumentList '10.50.0.0' | New-Variable -Name SQLServer2008R2 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '11.0.0.0' | New-Variable -Name SQLServer2012 -Scope Script -Option Constant
 New-Object -TypeName System.Version -ArgumentList '12.0.0.0' | New-Variable -Name SQLServer2014 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '13.0.0.0' | New-Variable -Name SQLServer2016 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '14.0.0.0' | New-Variable -Name SQLServer2017 -Scope Script -Option Constant
+New-Object -TypeName System.Version -ArgumentList '15.0.0.0' | New-Variable -Name SQLServer2019 -Scope Script -Option Constant
 
 New-Variable -Name StandaloneDbEngine -Scope Script -Option Constant -Value 'Standalone'
 New-Variable -Name AzureDbEngine -Scope Script -Option Constant -Value 'Windows Azure SQL Database'
@@ -2964,7 +2967,7 @@ function Get-FullTextLanguageValue($Language) {
 			1041 { 'Japanese'}
 			1042 { 'Korean'}
 			1043 { 'Dutch'}
-			1044 { 'Bokmål'}
+			1044 { 'Bokmï¿½l'}
 			1045 { 'Polish'}
 			1046 { 'Brazilian'}
 			1048 { 'Romanian'}
@@ -3208,7 +3211,7 @@ function Get-LanguageValue($Language) {
 			30 { 'Simplified Chinese'}
 			31 { 'Arabic'}
 			32 { 'Thai'}
-			33 { 'Bokmål'} 
+			33 { 'Bokmï¿½l'} 
 			$null {$null}
 			default {'Unknown'} 
 		}
